@@ -47,7 +47,7 @@ ignore_missing_imports = true
 addopts = "--import-mode=importlib"
 testpaths = ["tests"]
 
-# Vercel 入口：把 FastAPI app 显式暴露给 Vercel 的 Python ASGI 运行时
+# Vercel 入口：Vercel 自动检测 api/index.py 为 Python(ASGI) 函数并加载其中的 `app` 对象
 # （Vercel 2026 原生支持 ASGI，无需 Mangum）。
-[tool.vercel]
-entrypoint = "api/index:app"
+# 注意：不要在 [tool.vercel] 手写 entrypoint —— 模块路径解析会失败并报
+# "no matching module file was found"，交给 Vercel 自动检测即可。
