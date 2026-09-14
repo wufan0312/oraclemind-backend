@@ -2,12 +2,61 @@
 
 所有配置项集中在此，避免散落各处硬编码。
 新增配置：在此处加字段，并在 .env.example 中补充说明。
+
+【环境变量值的容错处理】
+云平台（Vercel / Railway 等）的环境变量面板经常被人为污染，实际踩到过的形态：
+  - 成对引号：`DEBUG="false"`、`JWT_EXPIRE_MINUTES="10080"`
+    → 布尔/整数字段直接 ValidationError 启动失败；
+    → 字符串字段更阴险：`APP_ENV="production"` 会让 is_production 判 False，
+      从而**静默跳过** JWT_SECRET 强度校验与 SQLite 拦截（安全语义被绕过）。
+  - CRLF 残留：Windows 记事本另存后再复制粘贴，值尾部带 `\\r`。
+  - 行内注释：`JWT_EXPIRE_MINUTES=10080  # 7 天`。
+
+因此统一在「校验之前」做一次清洗（去首尾空白与引号，数值字段额外去行内注释）。
+洁癖无损：这些配置项本身不会有首尾空格或引号，清洗只会让脏输入变成正确输入。
 """
 
 import os
 from functools import lru_cache
+from typing import Any
 
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 布尔字面量白名单（pydantic 原生仅认 true/false/1/0，这里补上常见的 yes/no/on/off）
+_BOOL_TRUE = frozenset({"1", "true", "t", "yes", "y", "on"})
+_BOOL_FALSE = frozenset({"0", "false", "f", "no", "n", "off", ""})
+
+# 需要「整数语义 + 明确报错」的字段，供统一校验器复用
+_INT_FIELDS = (
+    "port",
+    "jwt_expire_minutes",
+    "donation_expire_minutes",
+    "auth_rate_limit",
+    "auth_rate_window",
+    "search_scan_cap",
+    "stash_max_keys",
+    "stash_max_bytes",
+)
+_BOOL_FIELDS = ("debug", "proxy_trusted")
+
+
+def _clean_env_value(raw: Any) -> Any:
+    """清洗环境变量标量：去首尾空白（含 CRLF 残留）与成对引号。"""
+    if not isinstance(raw, str):
+        return raw
+    s = raw.strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        s = s[1:-1].strip()
+    return s
+
+
+def _clean_number_token(raw: Any) -> Any:
+    """在 _clean_env_value 之上，再去掉行内注释（`#` 之后），供数值/布尔字段使用。"""
+    s = _clean_env_value(raw)
+    if isinstance(s, str) and "#" in s:
+        s = s.split("#", 1)[0].strip()
+    return s
 
 
 class Settings(BaseSettings):
@@ -19,6 +68,46 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    # ===== 环境变量容错（见模块头 docstring）=====
+    @field_validator("*", mode="before")
+    @classmethod
+    def _normalize_env_scalars(cls, v: Any) -> Any:
+        """所有字段统一去空白/引号，避免 `"production"` 这类脏值静默改变语义。"""
+        return _clean_env_value(v)
+
+    @field_validator(*_BOOL_FIELDS, mode="before")
+    @classmethod
+    def _parse_bool_fields(cls, v: Any, info: ValidationInfo) -> Any:
+        """布尔字段：容忍引号/空格/行内注释，并给出可定位的报错。"""
+        s = _clean_number_token(v)
+        if isinstance(s, str):
+            low = s.lower()
+            if low in _BOOL_TRUE:
+                return True
+            if low in _BOOL_FALSE:
+                return False
+            raise ValueError(
+                f"环境变量 {info.field_name.upper()} 需为布尔值"
+                f"（true/false/1/0/yes/no/on/off），实际收到 {v!r}"
+            )
+        return s
+
+    @field_validator(*_INT_FIELDS, mode="before")
+    @classmethod
+    def _parse_int_fields(cls, v: Any, info: ValidationInfo) -> Any:
+        """整数字段：容忍引号/空格/行内注释；空值回落默认值，非法值明确报错。"""
+        s = _clean_number_token(v)
+        if isinstance(s, str):
+            if s == "":
+                return cls.model_fields[info.field_name].default
+            try:
+                return int(s)
+            except ValueError:
+                raise ValueError(
+                    f"环境变量 {info.field_name.upper()} 需为整数，实际收到 {v!r}"
+                ) from None
+        return s
 
     # ===== 应用 =====
     app_name: str = "玄镜 OracleMind 后端"
