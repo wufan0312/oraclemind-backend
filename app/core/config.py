@@ -109,6 +109,18 @@ class Settings(BaseSettings):
                 ) from None
         return s
 
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _parse_log_level(cls, v: Any) -> str:
+        """日志级别：空值/非法值回退 INFO，避免启动崩溃（Vercel 面板可能存空串）。"""
+        s = _clean_env_value(v)
+        if not s:
+            return "INFO"
+        up = s.upper()
+        if up in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+            return up
+        return "INFO"
+
     # ===== 应用 =====
     app_name: str = "玄镜 OracleMind 后端"
     app_version: str = "0.1.0"

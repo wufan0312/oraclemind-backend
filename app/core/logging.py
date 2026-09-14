@@ -23,7 +23,11 @@ def setup_logging() -> None:
     )
 
     root = logging.getLogger()
-    root.setLevel(settings.log_level.upper())
+    level_name = (settings.log_level or "INFO").upper()
+    try:
+        root.setLevel(level_name)
+    except ValueError:  # pragma: no cover - 防御：非法级别回退 INFO
+        root.setLevel(logging.INFO)
     root.addHandler(handler)
 
     # 降低第三方库噪音
