@@ -20,9 +20,15 @@
 | 环境 | `APP_ENV` | `DATABASE_URL` | 说明 |
 |------|-----------|----------------|------|
 | 本地 dev | `development` | `sqlite+aiosqlite:///./oraclemind.db` | 零配置，文件即库 |
-| staging/prod | `production` | `postgresql+asyncpg://user:pass@host:5432/db?sslmode=require` | 外部托管 PG |
+| staging/prod | `production` | `postgresql+asyncpg://user:pass@host:5432/db?ssl=require` | 外部托管 PG |
 
 `DATABASE_URL` 优先级：环境变量 > `.env`。Vercel 项目设置的 Environment Variables 会覆盖 `.env`。
+
+> ⚠️ **SSL 参数必须用 `ssl=require`，不是 `sslmode=require`。**
+> 运行时驱动是 **asyncpg**，它只认 `ssl`（如 `?ssl=require`）；而 `sslmode` 是 psycopg2/libpq 的
+> 参数，asyncpg 收到 `sslmode` 会直接报错。构建期的 `alembic upgrade head` 走 psycopg2，
+> `migrations/env.py` 会自动把 `ssl=*` 转成 `sslmode=*`，所以你只需在 `DATABASE_URL` 里写
+> `?ssl=require` 即可，两层都能通。
 
 ---
 
