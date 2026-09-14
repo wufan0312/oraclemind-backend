@@ -173,7 +173,7 @@ def upgrade() -> None:
                 "(author_id, author_name, circle_slug, title, content, images, topic_tags, "
                 " like_count, comment_count, view_count, is_pinned, status, created_at, updated_at) "
                 "VALUES (NULL, '玄镜小助手', :slug, :title, :content, '[]', :tags, "
-                " :likes, 0, 0, 0, 'published', now(), now())"
+                " :likes, 0, 0, FALSE, 'published', now(), now())"
             ),
             {"slug": slug, "title": title, "content": content, "tags": tags, "likes": likes},
         )

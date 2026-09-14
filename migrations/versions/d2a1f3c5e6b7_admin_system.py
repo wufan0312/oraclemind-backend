@@ -68,7 +68,7 @@ def upgrade() -> None:
     op.execute(
         sa.text(
             "INSERT INTO admins (username, password_hash, role, is_active, created_at, updated_at) "
-            "SELECT :username, :pwd, 'super_admin', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
+            "SELECT :username, :pwd, 'super_admin', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
             "WHERE NOT EXISTS (SELECT 1 FROM admins WHERE username = :username)"
         ).bindparams(username=DEFAULT_ADMIN_USERNAME, pwd=hashed)
     )
