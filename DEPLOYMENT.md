@@ -147,3 +147,83 @@ schema 由 Alembic 管理（`migrations/`），已生成 baseline `48b6c8479c7d`
 - **10s 超时（Hobby）**：Hobby 计划函数上限 10s，排盘类接口若偶发超时请升级 Pro（60s）。
 - **NEXT_PUBLIC_* 构建时注入**：前端改 `NEXT_PUBLIC_API_BASE` 后必须重新部署前端，仅改 Vercel
   环境变量不够（Next.js 在 build 时固化这些值）。
+
+---
+
+## 7. Vercel 部署实战排障记录（2026-09-14 全量复盘）
+
+以下为首次把本后端部署到 Vercel 时逐个踩过的坑，**按出现顺序**记录。每一关都已修复并验证，
+可作为后续部署/他人排障的对照表。
+
+### 0. 前置铁律（先读，能挡掉 80% 的坑）
+
+| 项 | 说明 |
+|----|------|
+| 变量必须勾 **Production 档** | Vercel 变量分 Production / Preview / Development 三档。部署是 production 环境，某变量没勾 Production 档 → 运行时取不到 → 落回代码默认值。本次多个崩溃本质是「变量没进 Production 运行时」而非代码 bug。 |
+| 改动 env 必须重新部署 | Vercel 改环境变量**不会热更**运行时。需基于最新 commit 重新 build，或改 env 后弹窗的 Redeploy（会重建并带新 env）。对旧部署快照点 Redeploy 不生效。 |
+| 本地访问需代理 | Vercel 域名在国内常被墙，本机直连可能 `ERR_CONNECTION_TIMED_OUT`（TCP 层就超时，非应用崩溃）。务必开代理 / 换网络 / 用在线探测工具验证。 |
+| 不能填空值 | Vercel 面板某变量设为空串，会覆盖代码默认值（如 `LOG_LEVEL`、`REDIS_URL` 被存成空 → 启动崩溃）。要么填实际值，要么干脆不设这个变量让它用默认。 |
+
+### 关卡速查表
+
+| # | 阶段 | 现象 | 根因 | 修复位置 |
+|---|------|------|------|----------|
+| ① | Build（alembic） | `invalid dsn: invalid connection option "ssl"` | `DATABASE_URL` 里的 `?ssl=require` 是 asyncpg 写法；构建期 `alembic` 走 psycopg2，只认 `sslmode` | `migrations/env.py` 的 `_sync_url` 自动 `ssl→sslmode` 转换 + 丢弃 asyncpg 专用参数 |
+| ② | Build（alembic） | `column "is_active" is of type boolean but expression is of type integer` | 迁移原始 SQL 给布尔列写整数字面量 `1`/`0`，PG 不允许 integer 隐转 boolean | `d2a1f3c5e6b7_admin_system.py`（`is_active` `1→TRUE`）、`f1a2b3c4d5e6_community.py`（`is_pinned` `0→FALSE`）|
+| ③ | Runtime 启动 | `FUNCTION_INVOCATION_FAILED`（无具体堆栈） | 初判 ENCRYPTION_KEY 缺失，**实际**是 `DATABASE_URL` 没进 Production 运行时 → `validate_for_runtime()` 检测到 SQLite 拒绝启动 | 在 Vercel 把 `DATABASE_URL` 等变量勾 Production 档 + 重新部署 |
+| ④ | Runtime 导入 | `ValueError: Redis URL must specify one of the following schemes` | `REDIS_URL` 填了非法值（空串/占位符），`Redis.from_url` 在 import 阶段即崩溃 | `app/db/session.py` 包 try/except，非法 URL 回退占位 Redis（缓存走内存兜底）|
+| ⑤ | Runtime 启动 | `ValueError: Unknown level: ''` | `LOG_LEVEL` 被存成空串，`root.setLevel('')` 崩溃 | `app/core/config.py` 给 `log_level` 加 validator 回退 `INFO`；`app/core/logging.py` 加 try/except 兜底 |
+| ⑥ | 本地访问 | `ERR_CONNECTION_TIMED_OUT` | 本机网络到 Vercel 被墙，非代码问题 | 开代理 / 换网络 / 用在线探测 |
+
+### 各关详情
+
+#### ① Build 期 alembic：`ssl` 参数不被 psycopg2 接受
+- 构建跑 `vercel.json` 的 `buildCommand: alembic upgrade head`，Alembic 用**同步驱动 psycopg2**。
+- `DATABASE_URL` 写成 `postgresql+asyncpg://...?ssl=require`，`ssl=require` 是 asyncpg 参数；psycopg2/libpq 只认 `sslmode` → `invalid dsn`。
+- **修复**：`migrations/env.py` 的 `_sync_url` 在切到 psycopg2 时把 `ssl=*` 改写成 `sslmode=*`，并丢弃 asyncpg 专用参数（`prepared_statement_cache_size` / `statement_cache_size` / `prepared_statement_name_func`，psycopg2 同样不认）。
+- 运行时（asyncpg）不受影响，继续写 `?ssl=require` 即可。
+
+#### ② Build 期 alembic：布尔列整数字面量
+- PG **不允许** integer 隐式转 boolean，但**字符串** `'1'`/`'0'` 可以（所以 `server_default='1'` 建表没问题）。
+- 会崩的是**裸 SQL INSERT 里的数值字面量**：`is_active` 写 `1`、`is_pinned` 写 `0`。
+- **修复**：改成 `TRUE` / `FALSE`（PG 与 SQLite 都认，可移植）。
+- 排查方法：全量 grep `migrations/versions` 里的 `op.execute` / `INSERT INTO`，确认仅此两处真布尔字面量（其余 `server_default='1'` 是字符串，安全）。
+
+#### ③ Runtime：`FUNCTION_INVOCATION_FAILED`（无堆栈）
+- 第一次看到时误判为「缺 ENCRYPTION_KEY」（`app/core/crypto.py` 生产无密钥会在 import 期 `raise`）。
+- 用户反馈变量一直设着，遂搭本地隔离 venv 做真实导入复现：
+  - 生产 env 全配上 → `import api.index` → **IMPORT OK**（代码无导入期崩溃）
+  - 仅撤掉 `DATABASE_URL` → 启动即崩，报错 `RuntimeError: 生产/Vercel 环境检测到 SQLite database_url，已阻止启动`
+- **真因**：构建环境有 `DATABASE_URL`、运行时没有 → 落回 SQLite 默认 → `validate_for_runtime()` 拒绝启动。
+- **判据（可复用）**：`FUNCTION_INVOCATION_FAILED` + 构建期 migrations 正常 = 运行时 env 缺失导致 SQLite 兜底。直接 `import api.index` 配齐/撤变量复现，比猜日志更准。
+
+#### ④ Runtime：`REDIS_URL` 非法导致 import 崩溃
+- 默认值 `redis://localhost:6379/0` 合法，因此必然是 Vercel 面板把 `REDIS_URL` 设成了非法值（空串/占位符）。
+- `app/db/session.py` 原本在**模块级** `redis_client = Redis.from_url(settings.redis_url, ...)`，import 阶段解析即抛 `ValueError`。
+- **修复**：改为 `_build_redis_client()`，try/except 包住；非法 URL 回退 `Redis(host="localhost", port=0, ...)` 占位实例，仅 warning。`redis_service.py` 调用层已捕获连接异常走内存缓存，import 不崩即可。
+- 验证：`REDIS_URL=false` 下 `import api.index` → `IMPORT_OK`（warning 后正常）。
+
+#### ⑤ Runtime：`log_level` 空串导致启动崩溃
+- `log_level` 默认 `"INFO"`，运行时被取为空串（与 ④ 同类：面板存空值）→ `root.setLevel('')` 抛 `ValueError`。
+- **修复（两层）**：
+  1. `app/core/config.py` 给 `log_level` 加 `field_validator`：空/非法值回退 `INFO`。
+  2. `app/core/logging.py` 对 `root.setLevel` 加 try/except 兜底 `INFO`。
+- 验证：`LOG_LEVEL=""` 下 `setup_logging()` 不崩，level=20(INFO)。
+
+#### ⑥ 本地访问超时（非代码）
+- 部署 `Ready Latest` 后，浏览器/本机 `curl` 均 `CONNECTION_TIMED_OUT`（http_code 000）。
+- 这是**网络层**到 Vercel 不通（国内墙），与代码无关。开代理 / 换网络 / 在线探测工具即可访问。
+- 注意区分：`CONNECTION_TIMED_OUT`（TCP 层没连上）= 网络问题；`FUNCTION_INVOCATION_FAILED` 或 JSON 500 = 应用问题。
+
+### 本次改动清单（均需 commit + push 到 `oraclemind-backend` 才生效）
+
+- `migrations/env.py` — `_sync_url` ssl→sslmode 转换 + 丢弃 asyncpg 专用参数
+- `migrations/versions/d2a1f3c5e6b7_admin_system.py` — `is_active` 字面量 `1→TRUE`
+- `migrations/versions/f1a2b3c4d5e6_community.py` — `is_pinned` 字面量 `0→FALSE`
+- `app/db/session.py` — `REDIS_URL` 非法时 import 期不崩溃
+- `app/core/config.py` — `log_level` 空值回退 INFO
+- `app/core/logging.py` — `root.setLevel` 兜底
+- `DEPLOYMENT.md` — 本排障章节 + 第 2 节 SSL 参数说明
+
+> ⚠️ 构建机从 `github.com/wufan0312/oraclemind-backend` 重新 clone，本地改动不自动生效。
+> 推上去后基于最新 commit 重新部署即可。
