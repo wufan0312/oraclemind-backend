@@ -9,6 +9,7 @@
 from collections.abc import AsyncGenerator
 
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -45,7 +46,23 @@ else:
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 # ===== Redis 客户端 =====
-redis_client: Redis = Redis.from_url(settings.redis_url, decode_responses=True)
+def _build_redis_client(url: str) -> Redis:
+    """构造 Redis 客户端；URL 非法时回退到本地占位实例，避免 import 阶段崩溃。
+
+    redis_service.py 已在调用层捕获连接异常并降级到内存缓存，因此此处只需保证
+    import 期不抛错即可。
+    """
+    try:
+        return Redis.from_url(url, decode_responses=True)
+    except (ValueError, RedisError) as exc:  # pragma: no cover - 部署 env 容错
+        logger.warning(
+            "REDIS_URL 无效 (%s)，回退到本地占位 Redis；缓存将以内存模式运行", exc
+        )
+        # 用 host/port 形式构造，避开 from_url 的解析异常；后续连接失败由调用方 catch
+        return Redis(host="localhost", port=0, decode_responses=True)
+
+
+redis_client: Redis = _build_redis_client(settings.redis_url)
 
 
 async def _autocommit_pending(session: AsyncSession) -> None:
