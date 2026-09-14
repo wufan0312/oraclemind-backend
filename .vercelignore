@@ -4,7 +4,8 @@
 # 只允许出现在 functions.<entry> 内，顶层 additionalProperties:false —— 会导致 GitHub 导入
 # 时报 "Invalid request: should NOT have additional property `excludeFiles`"。故迁移到此处。
 # 语法与 .gitignore 一致。
-# 注意：alembic/ 与 alembic.ini 参与 buildCommand，禁止排除；app/ 为运行时代码，禁止排除。
+# 注意：migrations/ 与 alembic.ini 参与 buildCommand（alembic upgrade head），禁止排除；
+# app/ 为运行时代码，api/ 为函数入口，同样禁止排除。
 
 # 虚拟环境 / 依赖缓存（Vercel 会按 requirements.txt 重新安装）
 .venv/
