@@ -1,0 +1,53 @@
+[project]
+name = "oraclemind-backend"
+version = "0.1.0"
+description = "玄镜 OracleMind 后端服务 - Python FastAPI 排盘计算服务（骨架）"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.4.0",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "alembic>=1.13.0",
+    "asyncpg>=0.29.0",        # 生产 PostgreSQL 异步驱动
+    "psycopg2-binary>=2.9.0", # Alembic 跑 PG 迁移所需的同步驱动
+    "aiosqlite>=0.20.0",      # 开发环境 SQLite 异步驱动
+    "redis>=5.0.0",
+    "cryptography>=42.0.0",   # P0-4 敏感字段 Fernet 加密
+    "PyJWT>=2.8.0",           # JWT 鉴权
+    "passlib>=1.7.4",         # 密码哈希（pbkdf2_sha256，纯 Python，无需 bcrypt 后端）
+    "lunar-python>=1.4.0",    # 八字/紫微/六爻/梅花/奇门 排盘
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+# tests/paipan/test_ziwei.py 与 tests/test_ziwei.py 同名，默认 file-based import
+# 会触发 import file mismatch；改用 importlib 模式即可跑通整个 tests/ 目录。
+addopts = "--import-mode=importlib"
+testpaths = ["tests"]
+
+# Vercel 入口：把 FastAPI app 显式暴露给 Vercel 的 Python ASGI 运行时
+# （Vercel 2026 原生支持 ASGI，无需 Mangum）。
+[tool.vercel]
+entrypoint = "api/index:app"

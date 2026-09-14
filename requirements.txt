@@ -1,0 +1,18 @@
+# 后端 Vercel Python Function 运行时依赖（精选，切勿用 pip freeze 整份 venv）。
+# 说明：venv 中另有 cv2/numpy/PIL/mypy 等与本后端无关的大包，绝对不要纳入。
+# Vercel Python 函数包体上限为 500MB 未压缩（Fluid compute 可到 5GB），本清单远在其内，
+# 但仍保持精简以加快冷启动与构建。
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.8.0
+pydantic-settings>=2.4.0
+sqlalchemy[asyncio]>=2.0.30
+alembic>=1.13.0
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.0
+aiosqlite>=0.20.0
+redis>=5.0.0
+cryptography>=42.0.0
+PyJWT>=2.8.0
+passlib>=1.7.4
+lunar-python>=1.4.0

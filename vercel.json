@@ -1,0 +1,20 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "alembic upgrade head",
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  },
+  "excludeFiles": [
+    ".venv/**",
+    "tests/**",
+    "backups/**",
+    "_dbtest/**",
+    "**/*.log",
+    "docs/**",
+    "scripts/backup_db.py",
+    "scripts/migrate_sqlite_to_pg.py"
+  ]
+}

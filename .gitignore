@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 环境变量（含密钥，勿提交）
+.env
+.env.local
+.env.prod
+
+# 数据库文件（本地开发产物，勿提交）
+# 注意：正式的 DATABASE_URL 请走 .env 配置，不要依赖仓库内的 db 文件
+*.db
+*.sqlite
+*.sqlite3
+oj_data/
+
+# 遗留的 JSON 存储（已由 ORM 接管）
+app/shares_data/
+
+# 隔离区：历史孤儿数据，确认无用后可整体删除
+_trash_dbs/
+
+# 服务日志
+oj_*.log
+*.log
+
+# 测试与工具
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 生成物归位目录（截图/html/json/日志等本地产物，勿提交；以后这类文件统一放这里）
+outputs/

@@ -1,0 +1,46 @@
+# 本地开发依赖编排 —— 一键拉起 PostgreSQL 16 + Redis 7
+# 用法：docker compose up -d
+# 版本：compose v2
+
+services:
+  # PostgreSQL（生产主库候选）—— 默认不启动，避免开发期白白占用资源。
+  # 缺陷报告 P0-1：开发环境后端实际用 SQLite，PG 仅规划中。需要 PG 时显式启用：
+  #   docker compose --profile postgres up -d postgres
+  # 并将后端 .env 的 DATABASE_URL 改为 postgresql+asyncpg://oraclemind:oraclemind@localhost:5432/oraclemind
+  postgres:
+    image: postgres:16-alpine
+    container_name: oraclemind-postgres
+    profiles: [postgres]
+    environment:
+      POSTGRES_USER: oraclemind
+      POSTGRES_PASSWORD: oraclemind
+      POSTGRES_DB: oraclemind
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oraclemind"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: oraclemind-redis
+    # 缺陷报告 P2-14：默认镜像不开启 AOF，容器重启会丢失预算计数等缓存数据。
+    # 显式开启 appendonly + everysec 落盘，配合 redis_data 卷实现持久化。
+    command: redis-server --appendonly yes --appendfsync everysec
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pg_data:
+  redis_data:

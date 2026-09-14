@@ -1,0 +1,159 @@
+"""应用配置 —— pydantic-settings 读取 .env / 环境变量。
+
+所有配置项集中在此，避免散落各处硬编码。
+新增配置：在此处加字段，并在 .env.example 中补充说明。
+"""
+
+import os
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """全局配置。字段名与 .env 中的键一一对应（大小写不敏感）。"""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # ===== 应用 =====
+    app_name: str = "玄镜 OracleMind 后端"
+    app_version: str = "0.1.0"
+    app_env: str = "development"  # development / production
+    # S8 修复：默认值偏安全（False）。开发期若想看 SQLAlchemy echo 调试日志再显式置 True。
+    # 之前默认 True 时，一旦生产漏配 APP_ENV=production，engine.echo 会把含绑定参数的 SQL
+    # 打到 stdout，造成参数泄露风险。
+    debug: bool = False
+    log_level: str = "INFO"
+
+    # ===== 服务 =====
+    host: str = "0.0.0.0"
+    port: int = 8000
+
+    # ===== 数据层（规划文档 §5：PostgreSQL 主库 + Redis 缓存）=====
+    # 开发环境可用 sqlite+aiosqlite:///./oraclemind.db（PG 不可达时降级）
+    database_url: str = "sqlite+aiosqlite:///./oraclemind.db"
+    redis_url: str = "redis://localhost:6379/0"
+
+    # ===== JWT 认证 =====
+    jwt_secret: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 10080  # 7 天
+
+    # ===== 字段级加密（敏感数据：出生信息等，见缺陷报告 P0-4）=====
+    # 留空则回退到 jwt_secret 派生密钥（仅开发可用）；生产环境务必设置独立强随机密钥。
+    # 生成命令：python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    encryption_key: str = ""
+
+    # ===== 随喜供养支付（#1：渠道可插拔）=====
+    # 未配置商户号时自动降级为 stub 渠道（返回占位引导，不产生真实交易）；
+    # 配齐以下四项后自动切换到真实微信支付 Native 下单。
+    wechat_mch_id: str = ""
+    wechat_app_id: str = ""
+    wechat_api_v3_key: str = ""
+    wechat_notify_url: str = ""  # 支付结果回调地址（需公网可达）
+    # 商户 API 证书序列号（native 下单需要）
+    wechat_serial_no: str = ""
+    # 订单有效期（分钟），超期未支付自动失效
+    donation_expire_minutes: int = 30
+
+    # ===== 敏感接口限流（登录/注册防暴力破解，原散落于 auth.py 局部常量，Q5 收敛）=====
+    auth_rate_limit: int = 10   # 固定窗口内允许的最大尝试次数
+    auth_rate_window: int = 60  # 窗口长度（秒）
+
+    # ===== 边界 / 扫描上限（Q5 收敛）=====
+    # 报告列表内存搜索候选上限：单身份报告量上限约 100，留 10 倍余量覆盖，
+    # 同时挡住「全表拉进内存」的 OOM 风险（原 _SEARCH_SCAN_CAP）。
+    search_scan_cap: int = 1000
+    # 上云 KV（stash）单身份资源上限（原无限制，Q2 加固）：
+    stash_max_keys: int = 200            # 单身份最多键数
+    stash_max_bytes: int = 5_000_000     # 单身份 value 总字节上限（约 5MB）
+
+    # ===== 支付回调鉴权（P0 修复：防伪造 success 免费解锁付费权益）=====
+    # 供自有/代理渠道或 stub 本地模拟真实回调使用的回调令牌。
+    # 配置后，/premium/notify 与 /donations/notify 必须携带匹配令牌（header X-Payment-Token）才处理订单；
+    # 令牌缺失/不匹配直接拒绝且绝不信任 payload.success。
+    # 未配置时：生产环境（APP_ENV=production）自动拒绝回调（403，防伪造），开发环境放行（本地便利）。
+    # 生成命令：python -c "import secrets; print(secrets.token_urlsafe(32))"
+    payment_callback_secret: str = ""
+
+    @property
+    def wechat_pay_enabled(self) -> bool:
+        """是否已配齐微信支付凭证（决定走真实支付还是 stub 降级）。"""
+        return all([
+            self.wechat_mch_id,
+            self.wechat_app_id,
+            self.wechat_api_v3_key,
+            self.wechat_serial_no,
+        ])
+
+    @property
+    def is_sqlite(self) -> bool:
+        """是否使用 SQLite（决定 engine 参数与 SQL 方言）。"""
+        return "sqlite" in self.database_url.lower()
+
+    # ===== CORS（前端 Next.js 开发/生产地址）=====
+    # 3000=默认 dev；3001=端口冲突时 Next 自动切换；3311=生产预览
+    cors_origins: str = "http://localhost:3000,http://localhost:3001,http://localhost:3311"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """解析逗号分隔的 CORS 来源为列表。"""
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.lower() == "production"
+
+    # ===== 反向代理信任（P1 修复 S3）=====
+    # 为 true 时启用 Starlette ProxyHeadersMiddleware，信任 X-Forwarded-* 头
+    # （仅当部署在可信反代后，否则客户端可伪造来源/协议）。默认 false 关闭，避免误信。
+    # 配合「生产强制 Cookie secure」使用：若反代 TLS 终结且开启本项，request.url.scheme 才正确。
+    proxy_trusted: bool = False
+
+    @property
+    def is_vercel(self) -> bool:
+        """是否运行在 Vercel 平台（Vercel 会注入 VERCEL=1）。"""
+        return os.environ.get("VERCEL", "") == "1"
+
+    def validate_for_runtime(self) -> None:
+        """生产/Vercel 环境禁止使用 SQLite。
+
+        Vercel 函数实例使用临时只读文件系统，SQLite 文件会在每次部署/冷启动后丢失，
+        且多实例间不共享。因此 staging/prod 必须由 DATABASE_URL 指向 PostgreSQL。
+        在 dev（app_env=development）下使用 SQLite 是允许的。
+        """
+        if (self.is_production or self.is_vercel) and self.is_sqlite:
+            raise RuntimeError(
+                "生产/Vercel 环境检测到 SQLite database_url，已阻止启动。\n"
+                "Vercel 文件系统是临时的，SQLite 数据会在每次部署后丢失。\n"
+                "请在环境变量 DATABASE_URL 中配置 PostgreSQL，例如：\n"
+                "  postgresql+asyncpg://<user>:<pass>@<host>:5432/<db>\n"
+                "然后用 `alembic upgrade head` 在 PG 上建表。"
+            )
+
+        # JWT 密钥校验：生产环境禁止空或保留默认占位符，否则攻击者可伪造任意用户 token。
+        # 占位符 "change-me-in-production" 随源码公开，若生产沿用，认证形同虚设
+        # （任意人都可用该密钥签发 admin 等高权限 token，完全绕过登录）。
+        if self.is_production and (
+            not self.jwt_secret or self.jwt_secret == "change-me-in-production"
+        ):
+            raise RuntimeError(
+                "生产环境 JWT_SECRET 不可为空或保留默认值 'change-me-in-production'，已阻止启动。\n"
+                "该默认值随源码公开，攻击者可借此伪造任意用户身份 token，完全绕过认证。\n"
+                "请在环境变量 JWT_SECRET 配置强随机密钥，例如：\n"
+                "  python -c \"import secrets; print(secrets.token_urlsafe(48))\"\n"
+            )
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """缓存配置实例（进程内只解析一次 .env）。"""
+    return Settings()
+
+
+settings = get_settings()
