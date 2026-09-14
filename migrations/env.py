@@ -18,7 +18,20 @@ import app.models  # noqa: F401 —— 注册全部 ORM 模型，供 autogenerat
 config = context.config
 
 # 注入运行时数据库 URL（覆盖 ini 中的占位），实现按 .env 切换
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# 防御：空值会在 create_engine 里抛出晦涩的
+#   "Could not parse SQLAlchemy URL from given URL string"
+# 这里提前给出可执行的明确报错（最常见诱因：Vercel 环境变量 DATABASE_URL 未填或填成 ""）
+_db_url = (settings.database_url or "").strip()
+if not _db_url:
+    raise RuntimeError(
+        "DATABASE_URL 未配置或为空。Vercel 构建期执行 `alembic upgrade head` 需要可连接的 "
+        "PostgreSQL。\n请在 Vercel 项目 → Settings → Environment Variables 中设置 DATABASE_URL，"
+        "格式：\n  postgresql+asyncpg://<user>:<password>@<host>/<db>?ssl=require"
+        "&prepared_statement_cache_size=0\n"
+        "（若想让构建不依赖数据库，可删除 vercel.json 中的 buildCommand，"
+        "迁移将在函数冷启动时执行）"
+    )
+config.set_main_option("sqlalchemy.url", _db_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
