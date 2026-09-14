@@ -1,0 +1,39 @@
+# Vercel 部署排除清单
+#
+# 说明：原先这些规则写在 vercel.json 的顶层 "excludeFiles"，该字段在 Vercel 官方 schema 中
+# 只允许出现在 functions.<entry> 内，顶层 additionalProperties:false —— 会导致 GitHub 导入
+# 时报 "Invalid request: should NOT have additional property `excludeFiles`"。故迁移到此处。
+# 语法与 .gitignore 一致。
+# 注意：alembic/ 与 alembic.ini 参与 buildCommand，禁止排除；app/ 为运行时代码，禁止排除。
+
+# 虚拟环境 / 依赖缓存（Vercel 会按 requirements.txt 重新安装）
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 本地开发辅助（不参与运行时与构建）
+tests/
+backups/
+_dbtest/
+docs/
+scripts/backup_db.py
+scripts/migrate_sqlite_to_pg.py
+.idea/
+.vscode/
+# ⚠️ 切勿在此写 "_*.py"：gitignore 语义下 "_*" 会连 __init__.py 一起匹配，
+# 导致 app/ 下 9 个 __init__.py 全被排除（子包退化、包内初始化静默失效）。
+
+# 密钥与本地库
+.env
+.env.*
+*.db
+*.sqlite3
+
+# 日志与生成物
+**/*.log
+outputs/

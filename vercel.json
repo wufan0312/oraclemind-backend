@@ -6,15 +6,5 @@
       "maxDuration": 60,
       "memory": 1024
     }
-  },
-  "excludeFiles": [
-    ".venv/**",
-    "tests/**",
-    "backups/**",
-    "_dbtest/**",
-    "**/*.log",
-    "docs/**",
-    "scripts/backup_db.py",
-    "scripts/migrate_sqlite_to_pg.py"
-  ]
+  }
 }
