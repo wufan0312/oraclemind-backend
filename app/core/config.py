@@ -177,6 +177,11 @@ class Settings(BaseSettings):
         会自动把它转回 psycopg2，两边都成立。
         """
         s = _clean_env_value(v)
+        if isinstance(s, str) and not s:
+            # 空串（面板里「变量建了但没填值」的常见形态）等同未配置：
+            # 返回默认值，让 validate_for_runtime() 用中文报错兜住，
+            # 而不是让 create_async_engine("") 在 import 期抛一个看不见 body 的异常。
+            return cls.model_fields["database_url"].default
         if isinstance(s, str) and s:
             low = s.lower()
             if low.startswith("postgres://"):
@@ -199,6 +204,10 @@ class Settings(BaseSettings):
         这种值**字节层面完全合法**，只是编码不同，这里直接换算成等价 Fernet 密钥，
         避免为了换个编码而再折腾一轮面板 + Redeploy。
         （换算是一一对应的：同一 hex 永远得到同一个 Fernet 密钥，不会导致存量密文解不开。）
+
+        识别顺序：合法 Fernet → 64 位 hex → 漏填充 base64 → 任意 ≥32 字符随机串 → 报错。
+        最后那条兜底是因为 crypto.py 只做 sha256 派生，格式并非硬约束；
+        校验过严曾在线上直接卡死整个后端的启动。
         """
         if not v:
             return v
@@ -231,11 +240,21 @@ class Settings(BaseSettings):
             except Exception:  # noqa: BLE001
                 pass
 
+        # ④ 兜底：任意 ≥32 字符的强随机串都接受。
+        #    app/core/crypto.py 实际是用 sha256(该字符串) 派生 Fernet 密钥的，
+        #    并不要求值本身就是 Fernet 格式。这里校验过严只会让「面板已填了随机密钥」
+        #    的部署在启动期崩掉（而 Serverless 上那是个看不见 body 的 500）。
+        #    保留 32 字符下限，避免有人填 "123456" 这种弱密钥。
+        #    注意：同一字符串永远派生出同一密钥，这里不做任何"猜测性修复"，
+        #    因此不会导致存量密文解不开。
+        if len(v) >= 32:
+            return v
+
         raise ValueError(
-            "ENCRYPTION_KEY 不是合法的 Fernet 密钥：应为 32 字节密钥，"
-            "编码为 url-safe base64（44 字符，结尾 '='）或 64 位 hex。"
-            "请检查 Vercel 面板的值是否含引号/空格/被截断，并重新生成："
+            "ENCRYPTION_KEY 太短或格式无法识别：至少需要 32 个字符的随机串。"
+            "推荐直接生成 Fernet 密钥（44 字符 url-safe base64）："
             "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+            "；64 位 hex（openssl rand -hex 32）也会被自动归一化。"
         )
 
     # ===== 应用 =====

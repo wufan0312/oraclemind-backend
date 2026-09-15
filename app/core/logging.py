@@ -1,11 +1,26 @@
 """统一日志配置 —— 结构化输出，方便后续接入 Prometheus / 日志采集。"""
 
 import logging
+import re
 import sys
 
 from app.core.config import settings
 
 _CONFIGURED = False
+
+# 连接串脱敏：postgres://user:pw@host → postgres://***:***@host
+_SECRET_IN_URL = re.compile(
+    r"(?P<scheme>[a-zA-Z0-9+.\-]+://)(?P<user>[^:/@\s]+):(?P<pw>[^@/\s]*)@"
+)
+
+
+def redact_secrets(text: str) -> str:
+    """抹掉文本中可能出现的数据库口令/带凭证 URL，用于安全地对外暴露错误详情。
+
+    启动期错误经常把 DATABASE_URL 原样带进异常消息（asyncpg 连接失败的提示里就有），
+    直接打进 JSON 响应会把口令泄漏到公网，统一在这里过一道。
+    """
+    return _SECRET_IN_URL.sub(lambda m: f"{m.group('scheme')}***:***@", text)
 
 
 def setup_logging() -> None:

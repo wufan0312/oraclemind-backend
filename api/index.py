@@ -57,7 +57,7 @@ def _build_boot_error_app(exc: BaseException) -> Any:
         "traceback": _redact(tail)[:1500],
         "hint": [
             "1) DATABASE_URL 必须是 postgresql+asyncpg://...（postgres:// 裸前缀会自动补全，但值不能为空或仍是 sqlite）",
-            "2) ENCRYPTION_KEY 必须是 44 字符的 url-safe base64（Fernet）；JWT_SECRET 不能是 change-me-in-production",
+            "2) ENCRYPTION_KEY 任意 ≥32 字符随机串即可（44 字符 Fernet / 64 位 hex 都会自动归一化）；JWT_SECRET 不能为空或 change-me-in-production",
             "3) Vercel 面板改完变量后必须手动 Redeploy，否则运行时拿到的还是旧值",
         ],
     }
