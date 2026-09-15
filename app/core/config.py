@@ -164,6 +164,50 @@ class Settings(BaseSettings):
             return up
         return "INFO"
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, v: Any) -> Any:
+        """把云厂商给的「裸 scheme」补全为异步驱动。
+
+        Neon/Supabase 控制台复制出来的常是 `postgres://` 或 `postgresql://`（不带驱动后缀）。
+        SQLAlchemy 会据此加载**同步**驱动 psycopg2，随后 create_async_engine 抛
+        "The asyncio extension requires an async driver" —— 而这发生在 **import 期**，
+        在 Vercel 上表现为 500 FUNCTION_INVOCATION_FAILED 且响应体为空，几乎无法定位。
+        这里统一补成 postgresql+asyncpg://；Alembic 侧 migrations/env.py 的 _sync_url
+        会自动把它转回 psycopg2，两边都成立。
+        """
+        s = _clean_env_value(v)
+        if isinstance(s, str) and s:
+            low = s.lower()
+            if low.startswith("postgres://"):
+                return "postgresql+asyncpg://" + s[len("postgres://") :]
+            if low.startswith("postgresql://"):
+                return "postgresql+asyncpg://" + s[len("postgresql://") :]
+        return s
+
+    @field_validator("encryption_key", mode="after")
+    @classmethod
+    def _check_encryption_key(cls, v: str) -> str:
+        """ENCRYPTION_KEY 必须是合法 Fernet 密钥，早失败并给出可操作的报错。
+
+        否则 cryptography 会在 import 期抛英文 ValueError，在 Vercel 上同样只是
+        一个没有 body 的 500，面板填错值（带引号/截断/非 base64）时排查成本极高。
+        留空表示回退到 jwt_secret 派生（仅开发可用），此处不拦。
+        """
+        if not v:
+            return v
+        from cryptography.fernet import Fernet  # 局部导入：避免顶层耦合
+
+        try:
+            Fernet(v.encode())
+        except Exception as exc:  # noqa: BLE001 - 统一转成带中文指引的报错
+            raise ValueError(
+                "ENCRYPTION_KEY 不是合法的 Fernet 密钥：必须是 32 字节 url-safe base64"
+                "（形如 'xxxx...='，共 44 个字符）。请检查 Vercel 面板的值是否含引号/空格/被截断，"
+                "并用 python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\" 重新生成。"
+            ) from exc
+        return v
+
     # ===== 应用 =====
     app_name: str = "玄镜 OracleMind 后端"
     app_version: str = "0.1.0"
