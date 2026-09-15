@@ -18,6 +18,7 @@
 
 import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationInfo, field_validator
@@ -59,11 +60,53 @@ def _clean_number_token(raw: Any) -> Any:
     return s
 
 
+# 支持的环境标识（APP_ENV 取值白名单）
+_KNOWN_ENVS = ("development", "production", "test")
+
+
+def _current_env() -> str:
+    """读取当前环境标识。
+
+    判定顺序：
+      1. APP_ENV 显式设置且在白名单内  → 用它（Vercel 面板 / 终端 export）
+      2. 未设置，但检测到 Vercel 平台（VERCEL=1）→ production
+      3. 其余情况 → development
+
+    第 2 条是防呆：Vercel 会自动注入 VERCEL=1。若忘了在面板配 APP_ENV，
+    没有这一条就会回落 development，加载 .env.development 把 CORS 设成
+    localhost、DEBUG 设成 true —— 线上既跨域失败又泄露 SQL 日志。
+    """
+    env = str(_clean_env_value(os.environ.get("APP_ENV") or "")).strip().lower()
+    if env:
+        return env if env in _KNOWN_ENVS else "development"
+    if str(_clean_env_value(os.environ.get("VERCEL") or "")).strip().lower() == "1":
+        return "production"
+    return "development"
+
+
+def _env_files() -> tuple[str, ...]:
+    """按 APP_ENV 组装 env 文件列表（**越靠后优先级越高**）。
+
+    最终优先级（高 → 低）：
+      1. 真实环境变量（Vercel 项目面板 / 终端 export）
+      2. .env.<APP_ENV>   —— 随仓库提交的环境默认值（团队共享）
+      3. .env            —— 个人本地兜底（gitignore，可放本机路径 / 密钥）
+
+    pydantic-settings 天然保证「环境变量 > env 文件」，且 env_file 元组中
+    靠后的文件覆盖靠前的，因此这个顺序正好实现「线上用面板、本地用 .env」。
+
+    这里用绝对路径而非相对路径：Vercel / uvicorn 的工作目录不保证是项目根，
+    相对 ".env" 会静默读不到文件（表现为配置回落默认值，极难排查）。
+    """
+    root = Path(__file__).resolve().parents[2]  # app/core/config.py → 项目根
+    return (str(root / ".env"), str(root / f".env.{_current_env()}"))
+
+
 class Settings(BaseSettings):
     """全局配置。字段名与 .env 中的键一一对应（大小写不敏感）。"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_env_files(),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
