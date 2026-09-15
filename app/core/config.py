@@ -188,25 +188,55 @@ class Settings(BaseSettings):
     @field_validator("encryption_key", mode="after")
     @classmethod
     def _check_encryption_key(cls, v: str) -> str:
-        """ENCRYPTION_KEY 必须是合法 Fernet 密钥，早失败并给出可操作的报错。
+        """把 ENCRYPTION_KEY 归一化成合法 Fernet 密钥，非法值早失败并给出可操作报错。
 
         否则 cryptography 会在 import 期抛英文 ValueError，在 Vercel 上同样只是
         一个没有 body 的 500，面板填错值（带引号/截断/非 base64）时排查成本极高。
         留空表示回退到 jwt_secret 派生（仅开发可用），此处不拦。
+
+        容错：面板上很常见的「32 字节随机 hex」（`openssl rand -hex 32`、
+        `secrets.token_hex(32)`，共 64 个字符）并非 Fernet 期望的 url-safe base64。
+        这种值**字节层面完全合法**，只是编码不同，这里直接换算成等价 Fernet 密钥，
+        避免为了换个编码而再折腾一轮面板 + Redeploy。
+        （换算是一一对应的：同一 hex 永远得到同一个 Fernet 密钥，不会导致存量密文解不开。）
         """
         if not v:
             return v
+        import base64
+        import binascii
+
         from cryptography.fernet import Fernet  # 局部导入：避免顶层耦合
 
+        # ① 已经是合法 Fernet 密钥
         try:
             Fernet(v.encode())
-        except Exception as exc:  # noqa: BLE001 - 统一转成带中文指引的报错
-            raise ValueError(
-                "ENCRYPTION_KEY 不是合法的 Fernet 密钥：必须是 32 字节 url-safe base64"
-                "（形如 'xxxx...='，共 44 个字符）。请检查 Vercel 面板的值是否含引号/空格/被截断，"
-                "并用 python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\" 重新生成。"
-            ) from exc
-        return v
+            return v
+        except Exception:  # noqa: BLE001 - 继续尝试下面的容错形态
+            pass
+
+        # ② 64 位 hex（32 字节原始密钥）→ url-safe base64
+        try:
+            raw = binascii.unhexlify(v)
+        except (binascii.Error, ValueError):
+            raw = b""
+        if len(raw) == 32:
+            return base64.urlsafe_b64encode(raw).decode()
+
+        # ③ 43 位 base64（漏了结尾的 '=' 填充）
+        if len(v) == 43:
+            padded = v + "="
+            try:
+                Fernet(padded.encode())
+                return padded
+            except Exception:  # noqa: BLE001
+                pass
+
+        raise ValueError(
+            "ENCRYPTION_KEY 不是合法的 Fernet 密钥：应为 32 字节密钥，"
+            "编码为 url-safe base64（44 字符，结尾 '='）或 64 位 hex。"
+            "请检查 Vercel 面板的值是否含引号/空格/被截断，并重新生成："
+            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+        )
 
     # ===== 应用 =====
     app_name: str = "玄镜 OracleMind 后端"
