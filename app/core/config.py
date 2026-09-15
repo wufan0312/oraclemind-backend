@@ -246,8 +246,15 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        """解析逗号分隔的 CORS 来源为列表。"""
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        """解析逗号分隔的 CORS 来源为列表，并并入内置线上前端域名（去重、保序）。
+
+        为什么内置：面板若配了「错的或空的」CORS_ORIGINS（本项目就曾误配成同名撞车域名
+        oraclemind.vercel.app），或 .env.production 未被上传到构建环境，白名单会退化成
+        localhost —— 线上前端被静默拒绝跨域，且不产生任何报错，排查极其费时。
+        内置域名做并集兜底后，env 仍然生效且可继续追加，只是不再可能把线上链路打穿。
+        """
+        parsed = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        return list(dict.fromkeys([*parsed, "https://oraclemind-frontend.vercel.app"]))
 
     @property
     def is_production(self) -> bool:
