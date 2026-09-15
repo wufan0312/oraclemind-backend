@@ -32,6 +32,11 @@ scripts/migrate_sqlite_to_pg.py
 # 密钥与本地库
 .env
 .env.*
+# ⚠️ 但 .env.development / .env.production 是「已提交的兜底默认值」，必须上传：
+#    它们只含地址/开关类非敏感配置，app/core/config.py 靠它们按 APP_ENV 分层加载。
+#    少了这两个文件，线上会静默用回代码默认值（CORS 只剩 localhost、DEBUG 等开关回默认）。
+!.env.development
+!.env.production
 *.db
 *.sqlite3
 
