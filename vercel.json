@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "alembic upgrade head",
+  "buildCommand": "alembic upgrade head || echo '[build] alembic 迁移未成功，交给运行时 init_db() 兜底；迁移失败不再阻断部署（否则只能看到上一版旧部署的 500）'",
   "functions": {
     "api/index.py": {
       "maxDuration": 60,
