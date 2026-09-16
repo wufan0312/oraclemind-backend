@@ -18,7 +18,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,7 @@ from app.core.audit import audited_commit
 from app.core.config import settings
 from app.core.ownership import actor_id_of, require_identity
 from app.core.payment_security import CALLBACK_TOKEN_HEADER, verify_notify_auth
+from app.core.region_block import reject_if_cn
 from app.db.session import get_db
 from app.models.premium_order import PremiumOrder
 from app.models.user import User
@@ -140,10 +141,12 @@ async def list_plans() -> PremiumPlansOut:
 @router.post("/premium/orders", response_model=PremiumOrderOut, status_code=status.HTTP_201_CREATED, summary="创建付费订单")
 async def create_premium_order(
     payload: PremiumOrderCreate,
+    request: Request,
     user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> PremiumOrderOut:
     """下单并获取支付引导；金额按服务端目录解析，客户端传值仅作参考（金额不采信）。"""
+    reject_if_cn(request)
     require_identity(user, payload.visitorId)
     item = get_item(payload.itemId)
     if item is None:
