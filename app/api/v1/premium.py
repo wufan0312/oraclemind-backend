@@ -151,6 +151,13 @@ async def create_premium_order(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"商品不存在：{payload.itemId}（可选：{', '.join(PREMIUM_CATALOG)}）",
         )
+    # 合规重定位（2026-09-17）：占卜类商品暂停销售，切断「获利引流」合规要件
+    PAUSED_ITEMS = {"tarot_deep", "astro_full", "all_access"}
+    if item.item_id in PAUSED_ITEMS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="该商品已暂停销售，全部基础功能永久免费可用 🙏",
+        )
 
     out_trade_no = build_out_trade_no()
     channel = get_channel()
