@@ -23,6 +23,9 @@ class DonationCreate(BaseModel):
     tier: str = Field(default="诚意", max_length=32, description="档位：心意 / 诚意 / 大愿 / 自定义")
     amountFen: int | None = Field(default=None, ge=MIN_AMOUNT_FEN, le=MAX_AMOUNT_FEN, description="自定义金额（分），tier=自定义 时必填")
     visitorId: str | None = Field(default=None, max_length=64, description="访客ID（匿名时必填）")
+    approvalId: int | None = Field(
+        default=None, description="审批 Gate 的 approval_id（P1 Human-in-the-loop）；不传则按原流程下单"
+    )
 
     @field_validator("tier")
     @classmethod

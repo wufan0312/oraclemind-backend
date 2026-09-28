@@ -16,6 +16,7 @@
 - 支付域：premium_orders（进阶内容付费订单，带商品标识，渠道可插拔）
 """
 
+from app.models.approval import Approval
 from app.models.audit import AuditLog
 # 注：admins / admin_audit_logs 已随后台管理系统拆分为独立服务 oraclemind-admin，
 # 模型定义不再注册于此（表仍在同一数据库，由后台服务与既有 Alembic 迁移维护）。
@@ -30,13 +31,16 @@ from app.models.donation_order import DonationOrder
 from app.models.premium_order import PremiumOrder
 from app.models.report import Report
 from app.models.report_annotation import ReportAnnotation
+from app.models.scale_attempt import ScaleAttempt
 from app.models.schema_migration import SchemaMigration
+from app.models.track_event import TrackEvent
 from app.models.share import Share
 from app.models.user import User
 from app.models.user_profile import UserProfile
 from app.models.user_stash import UserStash
 
 __all__ = [
+    "Approval",
     "AuditLog",
     "CommunityCircle",
     "CommunityPost",
@@ -47,7 +51,9 @@ __all__ = [
     "PremiumOrder",
     "Report",
     "ReportAnnotation",
+    "ScaleAttempt",
     "SchemaMigration",
+    "TrackEvent",
     "Share",
     "User",
     "UserProfile",

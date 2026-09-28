@@ -118,7 +118,7 @@ def upgrade() -> None:
         bind.execute(
             text(
                 "INSERT INTO community_circles (slug, name, icon, description, sort_order, created_at) "
-                "VALUES (:slug, :name, :icon, :desc, :order, now())"
+                "VALUES (:slug, :name, :icon, :desc, :order, CURRENT_TIMESTAMP)"
             ),
             {"slug": slug, "name": name, "icon": icon, "desc": desc, "order": order},
         )
@@ -136,7 +136,7 @@ def upgrade() -> None:
         bind.execute(
             text(
                 "INSERT INTO community_announcements (title, content, author_id, pinned, created_at) "
-                "VALUES (:title, :content, NULL, :pinned, now())"
+                "VALUES (:title, :content, NULL, :pinned, CURRENT_TIMESTAMP)"
             ),
             {"title": title, "content": content, "pinned": pinned},
         )

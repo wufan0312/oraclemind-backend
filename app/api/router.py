@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     angel,
+    approvals,
     auth,
     bazi,
     community,
@@ -19,9 +20,11 @@ from app.api.v1 import (
     liuren,
     taiyi,
     reports,
+    scales,
     shares,
     stash,
     ziwei,
+    track,
 )
 
 # 统一前缀 /api：后端部署为「独立 Vercel 项目」时，Vercel 把 /api/* 路由到 api/index.py
@@ -53,6 +56,13 @@ api_router.include_router(stash.router, prefix="/v1")
 api_router.include_router(angel.router, prefix="/v1")
 # 社区综合页（/community）：圈子 / 帖子 / 评论 / 点赞 / 公告 / 排行
 api_router.include_router(community.router, prefix="/v1")
+# 右轨心理学产品：结构化量表（大五等），无状态计分 API
+api_router.include_router(scales.router, prefix="/v1")
+# P0 漏斗埋点上报（匿名）：占卜 → 心理付费转化追踪
+api_router.include_router(track.router, prefix="/v1")
+
+# P1 审批 Gate（Human-in-the-loop）：付费 / 外发 / 删除等高风险操作的人工确认
+api_router.include_router(approvals.router, prefix="/v1")
 
 # 后台管理系统已于 2026-09-09 拆分为**独立服务** oraclemind-admin（端口 8001），
 # 不再挂载于此：共享同一数据库，但独立进程、独立鉴权（om_admin_auth），

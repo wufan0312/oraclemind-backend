@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.auth import get_optional_user, get_visitor_id
 from app.core.audit import audited_commit
 from app.core.config import settings
+from app.core.approval import ApprovalService, verify_approval
 from app.core.ownership import actor_id_of, require_identity
 from app.core.payment_security import CALLBACK_TOKEN_HEADER, verify_notify_auth
 from app.db.session import get_db
@@ -75,6 +76,19 @@ async def create_donation(
 ) -> DonationOut:
     """下单并获取支付引导；金额由服务端按档位解析，客户端传值仅作参考。"""
     require_identity(user, payload.visitorId)
+
+    # P1 Human-in-the-loop Gate：携带 approvalId 时，必须先通过「人类已批准」校验，
+    # 否则不得执行下单副作用（缺审批 → 428；未批准/已重放 → 428/409；归属不符 → 403）。
+    # 不传 approvalId 则保持原后置兼容流程（如 stub 测试路径）。
+    if payload.approvalId is not None:
+        await verify_approval(
+            db,
+            payload.approvalId,
+            expected_action_type="donation",
+            actor_type="user" if user is not None else "visitor",
+            actor_id=actor_id_of(user, payload.visitorId),
+        )
+
     try:
         amount_fen = payload.resolve_amount()
     except ValueError as exc:
@@ -100,6 +114,10 @@ async def create_donation(
     )
     db.add(order)
     await db.flush()
+    # P1：消费审批（防重放），随订单提交一并落库
+    if payload.approvalId is not None:
+        svc = ApprovalService()
+        await svc.consume(db, payload.approvalId)
     await audited_commit(
         db,
         "create_donation",
