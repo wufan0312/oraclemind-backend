@@ -1,3 +1,5 @@
-from app.harness.tool_gateway import ToolGateway, ToolSpec, ToolGatewayError
+"""App-side Harness 包。
 
-__all__ = ["ToolGateway", "ToolSpec", "ToolGatewayError"]
+原 tool_gateway.py（工具网关）经 2026-09-29 审查确认为孤立死代码（全仓库无调用方），
+已删除。此包暂保留为空命名空间，便于未来若引入后端侧 Harness 能力时复用。
+"""
